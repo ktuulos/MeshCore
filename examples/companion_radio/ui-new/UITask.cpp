@@ -19,6 +19,23 @@
 
 #define LONG_PRESS_MILLIS   1200
 
+// FAV_ALERT_ONLY=1: only a favourite ALERT message notifies; plain favourite messages, other
+// messages and acks make no sound, LED or vibration
+#ifndef FAV_ALERT_ONLY
+  #define FAV_ALERT_ONLY 0
+#endif
+
+// favourite notification: 2 x 100 ms beep.  ALERT: same + 1 s pause, repeated until a button press.
+// Tone is _node_prefs->alert_hz (custom var "alert_hz").
+#define FAV_BEEP_MILLIS   100
+#define FAV_BEEPS_MILLIS  (3*FAV_BEEP_MILLIS)             // beep, gap, beep
+#define ALERT_CYCLE_MILLIS (FAV_BEEPS_MILLIS + 1000)
+#define ALERT_LED_MILLIS  250
+
+static bool inBeep(unsigned long t) {   // t within the beep-gap-beep pattern
+  return t < FAV_BEEP_MILLIS || (t >= 2*FAV_BEEP_MILLIS && t < FAV_BEEPS_MILLIS);
+}
+
 #ifndef UI_RECENT_LIST_SIZE
   #define UI_RECENT_LIST_SIZE 4
 #endif
@@ -605,6 +622,10 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   vibration.begin();
 #endif
 
+#ifdef PIN_NOTIFY_LED
+  pinMode(PIN_NOTIFY_LED, OUTPUT);
+#endif
+
   ui_started_at = millis();
   _alert_expiry = 0;
 
@@ -620,7 +641,18 @@ void UITask::showAlert(const char* text, int duration_millis) {
 }
 
 void UITask::notify(UIEventType t) {
-#if defined(PIN_BUZZER)
+  if (t == UIEventType::favouriteAlert) {
+    if (_notify_mode != NOTIFY_ALERT) startNotification(NOTIFY_ALERT, true);  // ALERT ignores mute; a running one is not restarted
+  } else if (t == UIEventType::favouriteMessage) {
+#if !FAV_ALERT_ONLY
+    if (_notify_mode != NOTIFY_ALERT) startNotification(NOTIFY_FAVOURITE, false);
+#endif
+  } else if (t == UIEventType::tonePreview) {
+    if (_notify_mode != NOTIFY_ALERT) startNotification(NOTIFY_FAVOURITE, true);
+  }
+
+#if defined(PIN_BUZZER) && !FAV_ALERT_ONLY
+if (_notify_mode == NOTIFY_NONE)  // other sounds must not cut off a favourite / ALERT melody
 switch(t){
   case UIEventType::contactMessage:
     // gemini's pick
@@ -642,12 +674,78 @@ switch(t){
 
 #ifdef PIN_VIBRATION
   // Trigger vibration for all UI events except none
+#if FAV_ALERT_ONLY
+  if (t == UIEventType::favouriteAlert) {
+#else
   if (t != UIEventType::none) {
+#endif
     vibration.trigger();
   }
 #endif
 }
 
+
+void UITask::startNotification(NotifyMode mode, bool force) {
+  _notify_mode = mode;
+  _notify_force = force;
+  _notify_started = millis();
+  setNotifyTone(false);
+  notificationLoop();   // first beep and LED immediately
+}
+
+void UITask::stopNotification() {
+  _notify_mode = NOTIFY_NONE;
+  setNotifyTone(false);
+#ifdef PIN_BUZZER
+  buzzer.quiet(buzzer.isQuiet());  // restore buzzer enable pin after a forced tone
+#endif
+  setNotifyLed(false);
+}
+
+void UITask::setNotifyTone(bool on) {
+  if (on == _notify_tone) return;
+  _notify_tone = on;
+#ifdef PIN_BUZZER
+  if (on) {
+    uint16_t hz = _node_prefs->alert_hz;
+    if (hz < ALERT_HZ_MIN || hz > ALERT_HZ_MAX) hz = ALERT_HZ_DEFAULT;
+    buzzer.toneOn(hz, _notify_force);
+  } else {
+    buzzer.toneOff();
+  }
+#endif
+}
+
+void UITask::setNotifyLed(bool on) {
+#ifdef PIN_NOTIFY_LED
+  digitalWrite(PIN_NOTIFY_LED, on ? LED_STATE_ON : !LED_STATE_ON);
+#endif
+}
+
+void UITask::notificationLoop() {
+  if (_notify_mode == NOTIFY_NONE) return;
+  unsigned long elapsed = millis() - _notify_started;
+
+  if (_notify_mode == NOTIFY_ALERT) {
+    setNotifyTone(inBeep(elapsed % ALERT_CYCLE_MILLIS));
+    setNotifyLed((elapsed / ALERT_LED_MILLIS) % 2 == 0);
+  } else if (elapsed >= FAV_BEEPS_MILLIS) {
+    stopNotification();
+  } else {
+    bool on = inBeep(elapsed);   // LED follows the two beeps
+    setNotifyTone(on);
+    setNotifyLed(on);
+  }
+}
+
+// any user button event acknowledges a running ALERT, and is then swallowed
+int UITask::filterAlertButton(int ev) {
+  if (ev != BUTTON_EVENT_NONE && _notify_mode == NOTIFY_ALERT) {
+    stopNotification();
+    return BUTTON_EVENT_NONE;
+  }
+  return ev;
+}
 
 void UITask::msgRead(int msgcount) {
   _msgcount = msgcount;
@@ -736,7 +834,7 @@ bool UITask::isButtonPressed() const {
 void UITask::loop() {
   char c = 0;
 #if UI_HAS_JOYSTICK
-  int ev = user_btn.check();
+  int ev = filterAlertButton(user_btn.check());
   if (ev == BUTTON_EVENT_CLICK) {
     c = checkDisplayOn(KEY_ENTER);
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
@@ -759,7 +857,7 @@ void UITask::loop() {
     c = handleTripleClick(KEY_SELECT);
   }
 #elif defined(PIN_USER_BTN)
-  int ev = user_btn.check();
+  int ev = filterAlertButton(user_btn.check());
   if (ev == BUTTON_EVENT_CLICK) {
     c = checkDisplayOn(KEY_NEXT);
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
@@ -818,6 +916,7 @@ void UITask::loop() {
 #ifdef PIN_BUZZER
   if (buzzer.isPlaying())  buzzer.loop();
 #endif
+  notificationLoop();
 
   if (curr) curr->poll();
 

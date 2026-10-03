@@ -20,7 +20,9 @@ class genericBuzzer
 {
     public:
         void begin();  // set up buzzer port
-        void play(const char *melody); // Generic play function
+        void play(const char *melody, bool force = false); // Generic play function; force plays even when quiet
+        void toneOn(uint16_t hz, bool force = false);  // continuous tone (stops any melody); force plays even when quiet
+        void toneOff();
         void loop();  // loop driven-nonblocking
         void startup();  // play startup sound
         void shutdown();  // play shutdown sound
@@ -34,4 +36,5 @@ class genericBuzzer
         const char *shutdown_song = "Shutdown:d=4,o=5,b=100:8g5,16e5,16c5";
 
         bool _is_quiet = true;
+        bool _tone_on = false;
 };

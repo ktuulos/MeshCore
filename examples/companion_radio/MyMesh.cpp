@@ -469,7 +469,11 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   bool should_display = txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN;
   if (should_display && _ui) {
     _ui->newMsg(path_len, from.name, text, offline_queue_len);
-    if (!_serial->isConnected()) {
+    // favourites notify even with a client connected; room posts (SIGNED_PLAIN) are excluded
+    bool favourite = txt_type == TXT_TYPE_PLAIN && (from.flags & 0x01) != 0;
+    if (favourite) {
+      _ui->notify(strstr(text, FAV_ALERT_KEYWORD) ? UIEventType::favouriteAlert : UIEventType::favouriteMessage);
+    } else if (!_serial->isConnected()) {
       _ui->notify(UIEventType::contactMessage);
     }
   }
@@ -1814,6 +1818,10 @@ void MyMesh::handleCmdFrame(size_t len) {
       strcpy(dp, sensors.getSettingValue(i));
       dp = strchr(dp, 0);
     }
+#ifdef PIN_BUZZER
+    if (dp > (char *)&out_frame[1]) *dp++ = ',';
+    dp += sprintf(dp, "alert_hz:%u", (unsigned)_prefs.alert_hz);
+#endif
     _serial->writeFrame(out_frame, dp - (char *)out_frame);
   } else if (cmd_frame[0] == CMD_SET_CUSTOM_VAR && len >= 4) {
     cmd_frame[len] = 0;
@@ -1821,8 +1829,20 @@ void MyMesh::handleCmdFrame(size_t len) {
     char *np = strchr(sp, ':'); // look for separator char
     if (np) {
       *np++ = 0; // modify 'cmd_frame', replace ':' with null
-      bool success = sensors.setSettingValue(sp, np);
-      if (success) {
+#ifdef PIN_BUZZER
+      if (strcmp(sp, "alert_hz") == 0) {
+        int hz = atoi(np);
+        if (hz >= ALERT_HZ_MIN && hz <= ALERT_HZ_MAX) {
+          _prefs.alert_hz = hz;
+          savePrefs();
+          if (_ui) _ui->notify(UIEventType::tonePreview);
+          writeOKFrame();
+        } else {
+          writeErrFrame(ERR_CODE_ILLEGAL_ARG);
+        }
+      } else
+#endif
+      if (sensors.setSettingValue(sp, np)) {
         #if ENV_INCLUDE_GPS == 1
         // Update node preferences for GPS settings
         if (strcmp(sp, "gps") == 0) {
@@ -2263,5 +2283,5 @@ bool MyMesh::advert() {
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
-  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
+  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0 || (_ui && _ui->isNotifying());
 }

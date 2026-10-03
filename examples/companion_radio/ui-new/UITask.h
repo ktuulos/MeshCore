@@ -15,6 +15,9 @@
 #ifdef PIN_BUZZER
   #include <helpers/ui/buzzer.h>
 #endif
+#if !defined(PIN_NOTIFY_LED) && defined(P_LORA_TX_LED)
+  #define PIN_NOTIFY_LED P_LORA_TX_LED   // shared with TX blink unless the variant gives a dedicated LED
+#endif
 #ifdef PIN_VIBRATION
   #include <helpers/ui/GenericVibration.h>
 #endif
@@ -48,12 +51,26 @@ class UITask : public AbstractUITask {
   unsigned long _analogue_pin_read_millis = millis();
 #endif
 
+  enum NotifyMode { NOTIFY_NONE, NOTIFY_FAVOURITE, NOTIFY_ALERT };
+  NotifyMode _notify_mode = NOTIFY_NONE;
+  unsigned long _notify_started = 0;
+  bool _notify_force = false;   // sound even when the buzzer is muted
+  bool _notify_tone = false;    // tone currently on
+
   UIScreen* splash;
   UIScreen* home;
   UIScreen* msg_preview;
   UIScreen* curr;
 
   void userLedHandler();
+
+  // favourite / ALERT notification
+  void startNotification(NotifyMode mode, bool force);
+  void setNotifyTone(bool on);
+  void stopNotification();
+  void notificationLoop();
+  void setNotifyLed(bool on);
+  int  filterAlertButton(int ev);
 
   // Button action handlers
   char checkDisplayOn(char c);
@@ -95,6 +112,7 @@ public:
   void msgRead(int msgcount) override;
   void newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) override;
   void notify(UIEventType t = UIEventType::none) override;
+  bool isNotifying() const override { return _notify_mode != NOTIFY_NONE; }
   void loop() override;
 
   void shutdown(bool restart = false);

@@ -13,13 +13,20 @@
 
 #include "NodePrefs.h"
 
+#ifndef FAV_ALERT_KEYWORD
+  #define FAV_ALERT_KEYWORD "ALERT"   // case-sensitive; favourite message containing it raises a repeating alert
+#endif
+
 enum class UIEventType {
     none,
     contactMessage,
     channelMessage,
     roomMessage,
     newContactMessage,
-    ack
+    ack,
+    favouriteMessage,   // text message from a contact marked favourite
+    favouriteAlert,     // favourite message containing FAV_ALERT_KEYWORD
+    tonePreview         // alert tone changed: play the favourite beeps once
 };
 
 class AbstractUITask {
@@ -42,5 +49,6 @@ public:
   virtual void msgRead(int msgcount) = 0;
   virtual void newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) = 0;
   virtual void notify(UIEventType t = UIEventType::none) = 0;
+  virtual bool isNotifying() const { return false; }  // true while a notification must keep running (inhibits sleep)
   virtual void loop() = 0;
 };

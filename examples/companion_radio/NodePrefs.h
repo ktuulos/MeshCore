@@ -9,6 +9,12 @@
 #define ADVERT_LOC_NONE       0
 #define ADVERT_LOC_SHARE      1
 
+#ifndef ALERT_HZ_DEFAULT
+  #define ALERT_HZ_DEFAULT      2500   // favourite / ALERT beep tone
+#endif
+#define ALERT_HZ_MIN          100
+#define ALERT_HZ_MAX          10000
+
 class NodePrefs : public ConfigSerializer {  // persisted to file
 public:
   float airtime_factor = 0;
@@ -28,6 +34,7 @@ public:
   uint32_t ble_pin = 0;
   uint8_t  advert_loc_policy = 0;
   uint8_t  buzzer_quiet = 0;
+  uint16_t alert_hz = ALERT_HZ_DEFAULT;  // favourite / ALERT beep tone, custom var "alert_hz"
   uint8_t  vibe_quiet = 0;
   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
   uint32_t gps_interval = 0;     // GPS read interval in seconds
@@ -109,6 +116,7 @@ private:
       def("defs_key", (void *) _parent->default_scope_key, sizeof(_parent->default_scope_key));
       def("pin", _parent->ble_pin);
       def("buzz_q", _parent->buzzer_quiet);
+      def("alert_hz", _parent->alert_hz);
       def("vibe_q", _parent->vibe_quiet);
       def("auto_add", _parent->autoadd_config);    // bitmask for auto-add contacts config
       def("man_add", _parent->manual_add_contacts);
